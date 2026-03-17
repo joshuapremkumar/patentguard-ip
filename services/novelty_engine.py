@@ -6,7 +6,7 @@ Higher score = more novel (less similar prior art found).
 
 import logging
 import math
-from typing import TypedDict
+from typing import TypedDict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class PatentResult(TypedDict):
     link: str
 
 
-def calculate_novelty_score(idea: str, patents: list[PatentResult]) -> int:
+def calculate_novelty_score(idea: str, patents: list[Any]) -> int:
     """
     Calculates a novelty score for the invention against retrieved patents.
 
@@ -30,35 +30,57 @@ def calculate_novelty_score(idea: str, patents: list[PatentResult]) -> int:
     :param patents: List of similar patents found.
     :returns: Integer score 0–100.
     """
+
     if not patents:
         logger.info("No patents found — returning max novelty score of 100.")
         return 100
 
     idea_tokens = _tokenize(idea)
+
     if not idea_tokens:
-        return 50  # Neutral score for empty / non-parseable idea
+        logger.warning("Idea could not be tokenized. Returning neutral score.")
+        return 50
 
     total_overlap = 0.0
+    valid_patent_count = 0
+
     for patent in patents:
-        patent_tokens = _tokenize(patent.get("title", ""))
+
+        # Handle both dict and string results
+        if isinstance(patent, dict):
+            title = patent.get("title", "")
+        else:
+            title = str(patent)
+
+        if not title:
+            continue
+
+        patent_tokens = _tokenize(title)
         overlap = _jaccard_similarity(idea_tokens, patent_tokens)
+
         total_overlap += overlap
+        valid_patent_count += 1
+
         logger.debug(
             "Patent '%s' — Jaccard overlap: %.3f",
-            patent.get("title", "")[:60],
+            title[:60],
             overlap,
         )
 
-    # Average similarity across all patents (0.0 – 1.0)
-    avg_similarity = total_overlap / len(patents)
+    if valid_patent_count == 0:
+        logger.warning("No valid patent titles detected. Returning neutral score.")
+        return 50
 
-    # Apply a logarithmic penalty for number of patents found
-    patent_count_penalty = min(1.0, math.log(len(patents) + 1) / math.log(20))
+    # Average similarity across all patents
+    avg_similarity = total_overlap / valid_patent_count
 
-    # Combined similarity factor (weighted 70% avg overlap, 30% count penalty)
+    # Apply logarithmic penalty for number of patents found
+    patent_count_penalty = min(1.0, math.log(valid_patent_count + 1) / math.log(20))
+
+    # Combine similarity signals
     combined = (0.70 * avg_similarity) + (0.30 * patent_count_penalty)
 
-    # Novelty = inverse of similarity, scaled to 0–100
+    # Novelty score (inverse of similarity)
     novelty = max(0, min(100, round((1.0 - combined) * 100)))
 
     logger.info(
@@ -68,10 +90,14 @@ def calculate_novelty_score(idea: str, patents: list[PatentResult]) -> int:
         patent_count_penalty,
         combined,
     )
+
     return novelty
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# Helper functions
+# ──────────────────────────────────────────────────────────────
+
 _STOP_WORDS = {
     "a", "an", "the", "and", "or", "of", "for", "in", "on", "at",
     "to", "with", "using", "by", "is", "are", "that", "this", "it",
@@ -80,19 +106,30 @@ _STOP_WORDS = {
 
 
 def _tokenize(text: str) -> set[str]:
-    """Lowercase, split, and remove stop words from text."""
+    """Lowercase, split text, and remove stop words."""
+
+    if not text:
+        return set()
+
     tokens = set(
-        word.strip(".,;:()")
+        word.strip(".,;:()[]{}")
         for word in text.lower().split()
-        if word.strip(".,;:()") and word.strip(".,;:()") not in _STOP_WORDS
+        if word.strip(".,;:()[]{}") and word.strip(".,;:()[]{}") not in _STOP_WORDS
     )
+
     return tokens
 
 
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Compute Jaccard similarity between two token sets."""
+
     if not set_a or not set_b:
         return 0.0
+
     intersection = len(set_a & set_b)
     union = len(set_a | set_b)
-    return intersection / union if union > 0 else 0.0
+
+    if union == 0:
+        return 0.0
+
+    return intersection / union

@@ -38,7 +38,7 @@ async def search_patents(idea: str) -> PatentSearchResponse:
     logger.info("Patent Search Agent invoked with idea: %s", idea[:80])
 
     # Delegate web automation to TinyFish
-    patents: list[PatentResult] = await run_workflow(idea)
+    patents: list[PatentResult] = run_workflow(idea)
 
     logger.info("Patent Search Agent retrieved %d results.", len(patents))
 

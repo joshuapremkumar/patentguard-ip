@@ -1,4 +1,3 @@
-# PatentGuard IP — Python Dependencies
 streamlit>=1.32.0
 requests>=2.32.0
 beautifulsoup4>=4.14.0
