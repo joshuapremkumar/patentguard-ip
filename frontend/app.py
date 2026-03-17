@@ -4,11 +4,10 @@ Allows inventors to submit an idea and view novelty analysis results.
 """
 
 import streamlit as st
-import httpx
-import os
 
-# Backend API URL (defaults to local FastAPI for dev, override via env)
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
+from services.tinyfish_client import run_workflow
+from services.novelty_engine import calculate_novelty_score
+
 
 st.set_page_config(
     page_title="PatentGuard IP",
@@ -26,68 +25,83 @@ st.markdown(
 st.divider()
 
 # ── Input Section ──────────────────────────────────────────────────────────────
+
 idea = st.text_area(
     label="Invention Description",
     placeholder="e.g. A self-cleaning water bottle that uses UV-C LEDs to sterilize the interior...",
     height=160,
 )
 
-analyze_btn = st.button("🔍 Analyze Invention", type="primary", use_container_width=True)
+analyze_btn = st.button(
+    "🔍 Analyze Invention",
+    type="primary",
+    use_container_width=True
+)
 
 # ── Analysis Section ───────────────────────────────────────────────────────────
+
 if analyze_btn:
+
     if not idea.strip():
         st.warning("Please enter an invention description before analyzing.")
+        st.stop()
+
+    with st.spinner("Searching patents and calculating novelty score…"):
+
+        try:
+
+            patents = run_workflow(idea.strip())
+
+            novelty_score = calculate_novelty_score(
+                idea.strip(),
+                patents
+            )
+
+        except Exception as e:
+            st.error(f"Analysis failed: {str(e)}")
+            st.stop()
+
+    st.divider()
+
+    # ── Novelty Score ──────────────────────────────────────────────────────────
+
+    st.subheader("📊 Novelty Score")
+
+    color = (
+        "green" if novelty_score >= 70
+        else "orange" if novelty_score >= 40
+        else "red"
+    )
+
+    st.markdown(
+        f"<h1 style='color:{color}; text-align:center;'>{novelty_score} / 100</h1>",
+        unsafe_allow_html=True,
+    )
+
+    if novelty_score >= 70:
+        st.success("✅ High novelty — your invention appears largely unique.")
+    elif novelty_score >= 40:
+        st.warning("⚠️ Moderate novelty — some similar patents exist.")
     else:
-        with st.spinner("Searching patents and calculating novelty score…"):
-            try:
-                response = httpx.post(
-                    f"{BACKEND_URL}/analyze",
-                    json={"idea": idea.strip()},
-                    timeout=60.0,
-                )
-                response.raise_for_status()
-                data = response.json()
-            except httpx.HTTPStatusError as exc:
-                st.error(f"API error {exc.response.status_code}: {exc.response.text}")
-                st.stop()
-            except httpx.RequestError as exc:
-                st.error(f"Could not reach the backend: {exc}")
-                st.stop()
+        st.error("❌ Low novelty — closely related patents found.")
 
-        novelty_score: int = data.get("novelty_score", 0)
-        similar_patents: list = data.get("similar_patents", [])
+    st.progress(novelty_score / 100)
 
-        st.divider()
+    st.divider()
 
-        # ── Novelty Score ──────────────────────────────────────────────────────
-        st.subheader("📊 Novelty Score")
-        color = (
-            "green" if novelty_score >= 70
-            else "orange" if novelty_score >= 40
-            else "red"
-        )
-        st.markdown(
-            f"<h1 style='color:{color}; text-align:center;'>{novelty_score} / 100</h1>",
-            unsafe_allow_html=True,
-        )
-        if novelty_score >= 70:
-            st.success("✅ High novelty — your invention appears largely unique.")
-        elif novelty_score >= 40:
-            st.warning("⚠️ Moderate novelty — some similar patents exist.")
-        else:
-            st.error("❌ Low novelty — closely related patents found.")
+    # ── Similar Patents ────────────────────────────────────────────────────────
 
-        st.progress(novelty_score / 100)
+    st.subheader("📄 Similar Patents")
 
-        st.divider()
+    if patents:
 
-        # ── Similar Patents ────────────────────────────────────────────────────
-        st.subheader("📄 Similar Patents")
-        if similar_patents:
-            for patent in similar_patents:
-                title = patent.get("title", "Unknown Title")
-                link = patent.get("link", "#")
-                st.markdown(f"- [{title}]({link})")
-        else:
-            st.info("No similar patents found — your idea may be highly novel!")
+        for patent in patents:
+
+            title = patent.get("title", "Unknown Title")
+            link = patent.get("link", "#")
+
+            st.markdown(f"- [{title}]({link})")
+
+    else:
+
+        st.info("No similar patents found — your idea may be highly novel!")
