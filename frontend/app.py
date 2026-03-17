@@ -3,6 +3,10 @@ PatentGuard IP — Streamlit Frontend
 Allows inventors to submit an idea and view novelty analysis results.
 """
 
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import streamlit as st
 
 from services.tinyfish_client import run_workflow
